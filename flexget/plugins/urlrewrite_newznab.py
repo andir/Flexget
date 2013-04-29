@@ -2,7 +2,7 @@ __author__ = 'deksan'
 
 import logging
 import feedparser
-import urllib, urllib2, urlparse, httplib
+import urllib
 
 from flexget import validator
 from flexget.entry import Entry
@@ -79,30 +79,26 @@ class Newznab(object):
                 url = config['url'] + "&imdbid=" + imdb_id
                 log.debug(url)
 
-                try:
-                    data = urllib2.urlopen(url, timeout=20).read()
-                except urllib2.URLError, e:
-                    log.warn('Error fetching data from newznab provider: %s' % e)
-                    data = False
+                rss = feedparser.parse(url)
+                status = rss.get('status', False)
+                if status != 200:
+                    raise log.error('Search result not 200 (OK), received %s' % status)
 
-                if data:
-                    rss = feedparser.parse(data)
-
-                    if not len(rss.entries):
-                        log.info("No results returned")
-                    req = quals.Requirements(queue_item.quality)
-                    for rss_entry in rss.entries:
-                        entry = Entry()
-                        for key in rss_entry.keys():
-                            entry[key] = rss_entry[key]
-                        entry["url"] = entry["link"]
-                        entry.register_lazy_fields(['quality'], quality_plugin.instance.lazy_loader)
-                        if req.allows(entry['quality']):
-                            log.debug('{%s} {%s}' % (entry['quality'], entry['title']))
-                            entries.append(entry)
-                        else:
-                            log.debug('refused quality {%s} {%s}' % (entry['quality'], queue_item.quality))
-                        # todo : add newznab attributes such as size
+                if not len(rss.entries):
+                    log.info("No results returned")
+                req = quals.Requirements(queue_item.quality)
+                for rss_entry in rss.entries:
+                    entry = Entry()
+                    for key in rss_entry.keys():
+                        entry[key] = rss_entry[key]
+                    entry["url"] = entry["link"]
+                    entry.register_lazy_fields(['quality'], quality_plugin.instance.lazy_loader)
+                    if req.allows(entry['quality']):
+                        log.debug('{%s} {%s}' % (entry['quality'], entry['title']))
+                        entries.append(entry)
+                    else:
+                        log.debug('refused quality {%s} {%s}' % (entry['quality'], queue_item.quality))
+                    # todo : add newznab attributes such as size
 
         return entries
 
