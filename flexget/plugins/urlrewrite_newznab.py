@@ -6,7 +6,7 @@ import urllib, urllib2, urlparse, httplib
 
 from flexget import validator
 from flexget.entry import Entry
-from flexget.plugin import register_plugin, get_plugin_by_name, PluginWarning, DependencyError
+from flexget.plugin import register_plugin, get_plugin_by_name, DependencyError
 import flexget.utils.qualities as quals
 
 try:
@@ -21,7 +21,6 @@ class Newznab(object):
     """
         Newznab urlrewriter
         Provide a url or your webiste + apikey
-        
 
         movies:
           movie_queue: yes
@@ -30,7 +29,7 @@ class Newznab(object):
             website: https://website
             apikey: xxxxxxxxxxxxxxxxxxxxxxxxxx
             category: movie
-          
+
         Category is any of: movie, tvsearch, music, book
     """
     def validator(self):
@@ -42,49 +41,48 @@ class Newznab(object):
         root.accept('choice', key='category', required=True).accept_choices(['movie', 'tvsearch', 'tv', 'music', 'book'])
         return root
 
-    def build_config(self,config):
-        if ( config['category'] == 'tv'):
+    def build_config(self, config):
+        if config['category'] == 'tv':
             config['category'] = 'tvsearch'
-        if ( 'url' not in config ):
-            if ( 'apikey' in config and 'website' in config ):
+        if 'url' not in config:
+            if 'apikey' in config and 'website' in config:
                 params = {
-                    "t":config['category'],
+                    "t": config['category'],
                     "apikey": config['apikey'],
                     "extended": 1
                 }
-                config['url']=config['website']+'/api?'+urllib.urlencode(params)
+                config['url'] = config['website']+'/api?'+urllib.urlencode(params)
         return config
 
     def on_task_input(self, task, config):
         config = self.build_config(config)
         if config["category"] == "movie":
-            return self.on_task_input_movie(task, config)
+            return self.get_entries_movie(task, config)
         elif config["category"] == "tvsearch":
-            return self.on_task_input_tvsearch(task, config)
+            return self.get_entries_tvsearch(task, config)
         else:
             entries = []
             log.warning("Not done yet...")
             return entries
 
-    def on_task_input_tvsearch(self, task, config):
+    def get_entries_tvsearch(self, task, config):
         entries = []
-        
         return entries
 
-    def on_task_input_movie(self, task, config):
+    def get_entries_movie(self, task, config):
         entries = []
         quality_plugin = get_plugin_by_name('metainfo_quality')
         for queue_item in queue_get():
             if queue_item.imdb_id:
                 imdb_id = queue_item.imdb_id.replace('tt', '')
-                log.info('Searching for %s ( %s )' % (imdb_id, queue_item.quality ))
+                log.info('Searching for %s ( %s )' % (imdb_id, queue_item.quality))
                 url = config['url'] + "&imdbid=" + imdb_id
                 log.debug(url)
 
                 try:
                     data = urllib2.urlopen(url, timeout=20).read()
                 except urllib2.URLError, e:
-                    logger.warn('Error fetching data from newznab provider: %s' % e)
+                    log.warn('Error fetching data from newznab provider: %s' % e)
                     data = False
 
                 if data:
@@ -104,11 +102,8 @@ class Newznab(object):
                             entries.append(entry)
                         else:
                             log.debug('refused quality {%s} {%s}' % (entry['quality'], queue_item.quality))
-                        
                         # todo : add newznab attributes such as size
 
         return entries
-
-   
 
 register_plugin(Newznab, 'newznab', api_ver=2)
