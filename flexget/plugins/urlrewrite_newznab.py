@@ -44,8 +44,33 @@ class Newznab(object):
             wait: 30
         Category is any of: movie, tvsearch, music, book
         wait is time between two api request in seconds (if you don't want to get banned)
-        TV Series requires that you inject them with the command inject :
+
+        TV Series requires that you inject them with the command inject otherwise we will start at s01e01:
         ./bin/flexget --inject "XXXXXXX.S02E02.mkv" --learn --task tvseries
+
+        Example how to use for tv series :
+
+        tvseries:
+          newznab:
+            website: https://website
+            apikey: xxxxxxxxxxxxxxxxxxxxxxxxxx
+            category: tv
+          series:
+            720p+:
+            - My Favorite show1
+            - My Favorite show2
+          addanoutputhere.....:
+
+        Example how to use for movies (I am using an imdb to provide source) :
+        movies:
+          movie_queue: yes
+          newznab:
+            website: "http://website/"
+            apikey: "xxxxxxxxxxxxxxxxxxxxxxxxxx"
+            category: movie
+
+
+
     """
     def validator(self):
         """Return config validator."""
