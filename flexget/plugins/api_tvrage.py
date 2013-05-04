@@ -5,7 +5,11 @@ from flexget.utils.database import with_session
 
 log = logging.getLogger('api_tvrage')
 
-
+"""
+    See https://github.com/ckreutzer/python-tvrage for more details, it's pretty classic.
+    A cache could be handy to avoid querying informations but I guess it should be implemented in 
+    python-tvrage itself.
+"""
 @with_session
 def lookup_series(name=None, session=None):
     show = tvrage.api.Show(name)
