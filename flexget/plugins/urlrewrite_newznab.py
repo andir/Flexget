@@ -155,7 +155,6 @@ class Newznab(object):
                         entry[key] = rss_entry[key]
                     entry["url"] = entry["link"]
                     entries.append(entry)
-            #https://www.nmatrix.co.za/api?t=tvsearch&q=game%20of%20thrones&season=2&ep=5
         return entries
 
     def get_entries_movie(self, task, config):
