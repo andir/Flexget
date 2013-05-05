@@ -15,7 +15,8 @@ class SearchRSS(object):
         rss_plugin = get_plugin_by_name('rss')
         return rss_plugin.instance.validator()
 
-    def search(self, query, comparator, config=None):
+    def search(self, entry, comparator, config=None):
+        query = entry["title"]
         from flexget.utils.template import environment
         from flexget.manager import manager
         comparator.set_seq1(query)
