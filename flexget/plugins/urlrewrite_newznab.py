@@ -5,34 +5,17 @@ import feedparser
 import urllib
 
 from time import sleep
-from datetime import datetime
 from flexget import validator
 from flexget.entry import Entry
-from flexget.plugin import register_plugin, get_plugin_by_name, DependencyError
-from flexget.plugins.api_tvrage import lookup_series
-from flexget.utils import qualities
+from flexget.plugin import register_plugin
 
 log = logging.getLogger('newznab')
-
-try:
-    from flexget.plugins.filter.movie_queue import queue_get
-except ImportError as e:
-    log.error(e.message)
-    raise DependencyError(issued_by='urlrewrite_newznab', missing='movie_queue')
-
-try:
-    from flexget.plugins.filter.series import Episode
-    from flexget.plugins.filter.series import Series
-    from flexget.plugins.filter.series import SeriesDatabase
-except ImportError as e:
-    log.error(e.message)
-    raise DependencyError(issued_by='emit_series', missing='series')
 
 
 class Newznab(object):
     """
         Newznab urlrewriter
-        Provide a url or your webiste + apikey
+        Provide a url or your webiste + apikey and a category
 
         movies:
           movie_queue: yes
@@ -45,32 +28,41 @@ class Newznab(object):
         Category is any of: movie, tvsearch, music, book
         wait is time between two api request in seconds (if you don't want to get banned)
 
-        TV Series requires that you inject them with the command inject otherwise we will start at s01e01:
-        ./bin/flexget --inject "XXXXXXX.S02E02.mkv" --learn --task tvseries
 
         Example how to use for tv series :
+        --------------------------------------------------------------------------------
+              tvsearch:
+                series:
+                  720p+:
+                    - Your lovely show 1
+                    - Your lovely show 2
+                discover:
+                  what:
+                    - emit_series: yes
+                  from:
+                    - newznab:
+                        website: "http://www.xxxxxx.com/"
+                        apikey: "xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        category: tv
+                        wait: 3
+                make_rss:
+                  file: /tmp/output.xml
 
-        tvseries:
-          newznab:
-            website: https://website
-            apikey: xxxxxxxxxxxxxxxxxxxxxxxxxx
-            category: tv
-          series:
-            720p+:
-            - My Favorite show1
-            - My Favorite show2
-          addanoutputhere.....:
-
-        Example how to use for movies (I am using an imdb to provide source) :
-        movies:
-          movie_queue: yes
-          newznab:
-            website: "http://website/"
-            apikey: "xxxxxxxxxxxxxxxxxxxxxxxxxx"
-            category: movie
-
-
-
+        Example how to use for movies (queue is set with imdb plugins for example) :
+        --------------------------------------------------------------------------------
+              moviessearch:
+                movie_queue: yes
+                discover:
+                  what:
+                    - emit_movie_queue: yes
+                  from:
+                    - newznab:
+                        website: "http://www.xxxxxx.com/"
+                        apikey: "xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        category: movie
+                        wait: 3
+                make_rss:
+                  file: /tmp/output.xml
     """
     def validator(self):
         """Return config validator."""
@@ -97,98 +89,59 @@ class Newznab(object):
                 }
                 config['url'] = config['website']+'/api?'+urllib.urlencode(params)
         log.debug(config['url'])
+
         return config
 
-    def on_task_input(self, task, config):
+    def fill_entries_for_url(self, url, config):
+        entries = []
+        log.info("Sleeping %s sec before making our request to %s " % (config['wait'], url))
+        sleep(config["wait"])
+
+        rss = feedparser.parse(url)
+        status = rss.get('status', False)
+        if status != 200:
+            raise log.error('Search result not 200 (OK), received %s' % status)
+
+        if not len(rss.entries):
+            log.info("No results returned")
+
+        for rss_entry in rss.entries:
+            new_entry = Entry()
+            for key in rss_entry.keys():
+                new_entry[key] = rss_entry[key]
+            new_entry["url"] = new_entry["link"]
+            entries.append(new_entry)
+        return entries
+
+    def search(self, entry, comparator, config=None):
         config = self.build_config(config)
         if config["category"] == "movie":
-            return self.get_entries_movie(task, config)
+            return self.do_search_movie(entry, comparator, config)
         elif config["category"] == "tvsearch":
-            return self.get_entries_tvsearch(task, config)
+            return self.do_search_tvsearch(entry, comparator, config)
         else:
             entries = []
             log.warning("Not done yet...")
             return entries
 
-    def get_entries_tvsearch(self, task, config):
+    def do_search_tvsearch(self, arg_entry, comparator, config=None):
+        log.info("Searching for %s" % (arg_entry["title"]))
+        # normally this should be used with emit_series who has provided season and episodenumber
+        if 'serie_rageid' not in arg_entry or 'serie_name' not in arg_entry or 'serie_season' not in arg_entry or 'serie_epnumber' not in arg_entry:
+            return []
+
+        url = config['url'] + "&rid=" + str(arg_entry['serie_rageid']) + "&season=" + str(arg_entry['serie_season']) + "&ep=" + str(arg_entry['serie_epnumber'])
+        return self.fill_entries_for_url(url, config)
+
+    def do_search_movie(self, arg_entry, comparator, config=None):
         entries = []
-        sdb = SeriesDatabase()
-        for serie in task.session.query(Series).all():
-            log.info("Handling %s" % serie.name)
-            latest = sdb.get_latest_download(serie)
-            if latest is None:
-                log.info("Never been downloaded, starting at the begining")
-                latest = Episode()
-                latest.season = 1
-                latest.number = 0   # we ll add one after because we skip the latest found... not elegant :(
-            serie_info = lookup_series(name=serie.name)
-            latest_episode_info = serie_info.latest_episode
+        log.info("Searching for %s (imdbid:%s) " % (arg_entry["title"], arg_entry["imdb_id"]))
+        # normally this should be used with emit_movie_queue who has imdbid (i guess)
+        if 'imdb_id' not in arg_entry:
+            return entries
 
-            #check if we have seen the latest aired first
-            if latest_episode_info.number == latest.number and latest_episode_info.season == latest.season:
-                log.info("We have the last aired episode (%s) please be patient." % latest_episode_info)
-                continue
-            wanted_episodenum = latest.number+1
-            wanted_seasonnum = latest.season
-            log.debug("%s %s" % (len(serie_info.season(latest.season).keys()), wanted_episodenum))
-            if len(serie_info.season(latest.season).keys()) < wanted_episodenum:
-                wanted_seasonnum += 1
-                wanted_episodenum = 1
+        imdb_id = arg_entry["imdb_id"].replace('tt', '')
+        url = config['url'] + "&imdbid=" + imdb_id
+        return self.fill_entries_for_url(url, config)
 
-            wanted_episode_info = serie_info.season(wanted_seasonnum).episode(wanted_episodenum)
-            now = datetime.now()
-            if (now.date() >= wanted_episode_info.airdate):
-                log.info('Searching for %s ' % wanted_episode_info)
-                url = config['url'] + "&rid=" + str(serie_info.showid) + "&season=" + str(wanted_episode_info.season) + "&ep=" + str(wanted_episode_info.number)
-                log.info("Sleeping %s sec before making our request to %s " % (config['wait'], url))
-                sleep(config["wait"])
-                rss = feedparser.parse(url)
-                status = rss.get('status', False)
-                if status != 200:
-                    raise log.error('Search result not 200 (OK), received %s' % status)
-
-                if not len(rss.entries):
-                    log.info("No results returned")
-                for rss_entry in rss.entries:
-                    entry = Entry()
-                    for key in rss_entry.keys():
-                        entry[key] = rss_entry[key]
-                    entry["url"] = entry["link"]
-                    entries.append(entry)
-        return entries
-
-    def get_entries_movie(self, task, config):
-        entries = []
-        quality_plugin = get_plugin_by_name('metainfo_quality')
-        for queue_item in queue_get():
-            if queue_item.imdb_id:
-                imdb_id = queue_item.imdb_id.replace('tt', '')
-                log.info('Searching for %s ( %s )' % (imdb_id, queue_item.quality))
-                url = config['url'] + "&imdbid=" + imdb_id
-                log.info("Sleeping %s sec before making our request to %s " % (config['wait'], url))
-                sleep(config["wait"])
-
-                rss = feedparser.parse(url)
-                status = rss.get('status', False)
-                if status != 200:
-                    raise log.error('Search result not 200 (OK), received %s' % status)
-
-                if not len(rss.entries):
-                    log.info("No results returned")
-                req = qualities.Requirements(queue_item.quality)
-                for rss_entry in rss.entries:
-                    entry = Entry()
-                    for key in rss_entry.keys():
-                        entry[key] = rss_entry[key]
-                    entry["url"] = entry["link"]
-                    entry.register_lazy_fields(['quality'], quality_plugin.instance.lazy_loader)
-                    if req.allows(entry['quality']):
-                        log.debug('{%s} {%s}' % (entry['quality'], entry['title']))
-                        entries.append(entry)
-                    else:
-                        log.debug('refused quality {%s} {%s}' % (entry['quality'], queue_item.quality))
-                    # todo : add newznab attributes such as size
-
-        return entries
-
-register_plugin(Newznab, 'newznab', api_ver=2)
+register_plugin(Newznab, 'newznab', api_ver=2, groups=['search'])
