@@ -2,6 +2,7 @@ from __future__ import unicode_literals, division, absolute_import
 import logging
 from flexget.entry import Entry
 from flexget.plugin import register_plugin, get_plugin_by_name, DependencyError
+from datetime import datetime
 
 try:
     from flexget.plugins.filter.movie_queue import queue_get
@@ -21,17 +22,19 @@ class EmitIMDBQueue(object):
         advanced = root.accept('dict')
         advanced.accept('boolean', key='year')
         advanced.accept('boolean', key='quality')
+        advanced.accept('boolean', key='only_aired')
         return root
 
     def prepare_config(self, config):
         if isinstance(config, bool):
-            config = {'year': True, 'quality': True}
+            config = {'year': True, 'quality': True, 'only_aired': True}
         return config
 
     def on_task_input(self, task, config):
         if not config:
             return
         config = self.prepare_config(config)
+        now = datetime.now()
 
         entries = []
 
@@ -65,9 +68,14 @@ class EmitIMDBQueue(object):
             # TODO: qualities can now be ranges.. how should we handle this?
             #if config.get('quality') and queue_item.quality != 'ANY':
             #    entry['title'] += ' %s' % queue_item.quality
-            entries.append(entry)
-            log.debug('Added title and IMDB id to new entry: %s - %s' %
-                     (entry['title'], entry['imdb_id']))
+            add = True
+            if config.get('only_aired') and 'tmdb_released' in entry:
+                if now.date() < entry['tmdb_released'].date():
+                    log.debug("title hasn't aired yet : %s - %s" % (entry['title'], entry['imdb_id']))
+                    add = False
+            if add:
+                entries.append(entry)
+                log.debug('Added title and IMDB id to new entry: %s - %s' % (entry['title'], entry['imdb_id']))
 
         return entries
 
