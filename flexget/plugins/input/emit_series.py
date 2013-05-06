@@ -22,9 +22,22 @@ class EmitSeries(SeriesDatabase):
 
     def validator(self):
         from flexget import validator
-        return validator.factory('boolean')
+        root = validator.factory()
+        root.accept('boolean')
+        advanced = root.accept('dict')
+        advanced.accept('boolean', key='only_aired')
+        return root
+
+    def prepare_config(self, config):
+        if isinstance(config, bool):
+            config = {'only_aired': True}
+        return config
 
     def on_task_input(self, task, config):
+        if not config:
+            return
+        config = self.prepare_config(config)
+
         entries = []
         for serie in task.session.query(Series).all():
             latest_dlded = self.get_latest_info(serie)
@@ -38,23 +51,30 @@ class EmitSeries(SeriesDatabase):
             serie_info = lookup_series(name=serie.name)
             latest_episode_info = serie_info.latest_episode
 
-            #check if we have seen the latest aired first
-            if latest_episode_info.number == latest_dlded['episode'] and latest_episode_info.season == latest_dlded['season']:
-                log.info("We have the last aired episode (%s) please be patient." % latest_episode_info)
-                continue
+            # check if we have seen the latest aired first
+            if config['only_aired']:
+                if latest_episode_info.number == latest_dlded['episode'] and latest_episode_info.season == latest_dlded['season']:
+                    log.info("We have the last aired episode (%s) please be patient." % latest_episode_info)
+                    continue
             wanted_episodenum = latest_dlded['episode']+1
             wanted_seasonnum = latest_dlded['season']
 
-            #finished that season let's skip to next one
+            # finished that season let's skip to next one
             if len(serie_info.season(latest_dlded['season']).keys()) < wanted_episodenum:
                 wanted_seasonnum += 1
                 wanted_episodenum = 1
 
             wanted_episode_info = serie_info.season(wanted_seasonnum).episode(wanted_episodenum)
-            now = datetime.now()
-            if (now.date() >= wanted_episode_info.airdate):
+
+            # Check if the episode has aired
+            add = True
+            if config['only_aired']:
+                now = datetime.now()
+                if now.date() < wanted_episode_info.airdate:
+                    add = False
+            if add:
                 title = '%s S%02dE%02d' % (serie.name, wanted_seasonnum, wanted_episodenum)
-                entries.append(Entry(title=title, url='', serie_rageid=serie_info.showid, serie_name=serie.name, serie_season=wanted_episodenum, serie_epnumber=wanted_episodenum))
+                entries.append(Entry(title=title, url='', serie_rageid=serie_info.showid, serie_name=serie.name, serie_season=wanted_seasonnum, serie_epnumber=wanted_episodenum))
         return entries
 
 
